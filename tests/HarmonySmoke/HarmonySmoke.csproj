@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(BepInExCoreRoot)' != ''">
+    <Reference Include="0Harmony"><HintPath>$(BepInExCoreRoot)\0Harmony.dll</HintPath></Reference>
+    <Reference Include="MonoMod.RuntimeDetour"><HintPath>$(BepInExCoreRoot)\MonoMod.RuntimeDetour.dll</HintPath></Reference>
+    <Reference Include="MonoMod.Utils"><HintPath>$(BepInExCoreRoot)\MonoMod.Utils.dll</HintPath></Reference>
+    <Reference Include="Mono.Cecil"><HintPath>$(BepInExCoreRoot)\Mono.Cecil.dll</HintPath></Reference>
+  </ItemGroup>
+  <ItemGroup Condition="'$(BepInExCoreRoot)' == ''">
+    <PackageReference Include="HarmonyX" Version="[2.9.0]" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="[1.0.3]" PrivateAssets="all" />
+    <Compile Include="..\..\Core\WindowController.cs" Link="WindowController.cs" />
+    <Compile Include="..\..\Core\GameDisplayIntegration.cs" Link="GameDisplayIntegration.cs" />
+    <Compile Include="..\..\GameDisplayHooks.cs" Link="GameDisplayHooks.cs" />
+    <Compile Include="..\FakePlatform.cs" Link="FakePlatform.cs" />
+    <Compile Include="..\GameIntegrationTests.cs" Link="GameIntegrationTests.cs" />
+  </ItemGroup>
+</Project>

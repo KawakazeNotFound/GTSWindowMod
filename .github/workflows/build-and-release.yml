@@ -1,0 +1,94 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    outputs:
+      artifact-name: GTSWindowMod-${{ github.run_id }}-${{ github.run_attempt }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build, run 93 checks, package and verify
+        run: ./scripts/package.ps1 -LockedMode
+      - name: Upload verified package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: GTSWindowMod-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Build summary
+        run: |
+          @"
+          ## GTSWindowMod verified
+          - Commit: $env:GITHUB_SHA
+          - Plugin: .NET Framework 4.7.2
+          - 85 logic/hidden-window checks and 8 real-Harmony synthetic checks passed.
+          - Package allowlist and every file checksum verified.
+          - No game, Unity, BepInEx or Harmony assemblies are shipped.
+          - CI is not Unity gameplay or visual verification.
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: release_files
+      - name: Publish verified tag as a formal Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $metadata = Get-Content -LiteralPath release_files/BUILD_INFO.json -Raw | ConvertFrom-Json
+          if ("v$($metadata.version)" -cne $env:RELEASE_TAG -or $metadata.commit -cne $env:GITHUB_SHA) { throw 'Release provenance mismatch' }
+          $zip = Get-Item -LiteralPath "release_files/GTSWindowMod-$($env:RELEASE_TAG).zip"
+          $expected = ((Get-Content -LiteralPath "$($zip.FullName).sha256" -Raw) -split '\s+')[0]
+          if ((Get-FileHash -LiteralPath $zip.FullName -Algorithm SHA256).Hash -ine $expected) { throw 'Downloaded artifact checksum mismatch' }
+          $existing = & gh release view $env:RELEASE_TAG --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not ($existing | ConvertFrom-Json).isDraft) { throw 'Release is already published; assets left unchanged' }
+          } else {
+            & gh release create $env:RELEASE_TAG --verify-tag --draft --title "GTSWindowMod $($env:RELEASE_TAG)" --notes-file release_files/RELEASE_NOTES.md
+            if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed' }
+          }
+          & gh release upload $env:RELEASE_TAG $zip.FullName "$($zip.FullName).sha256" release_files/BUILD_INFO.json --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }
+          & gh release edit $env:RELEASE_TAG --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
